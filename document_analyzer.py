@@ -19,10 +19,12 @@ class DocumentAnalyzer:
             try:
                 self.nlp = spacy.load("en_core_web_sm")
                 logger.info("Successfully loaded small model")
-            except OSError as e:
-                logger.error(f"Failed to load spaCy model: {e}")
-                # Try downloading the model
-                os.system("python -m spacy download en_core_web_sm")
+            except OSError:
+                logger.info("Model not found, downloading...")
+                # Use subprocess instead of os.system for better error handling
+                import subprocess
+                import sys
+                subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
                 self.nlp = spacy.load("en_core_web_sm")
                 logger.info("Successfully downloaded and loaded small model")
 

@@ -1,14 +1,26 @@
 #!/bin/bash
 
-# Make script executable
-chmod +x setup.sh
+# Function to install spaCy model
+install_spacy_model() {
+    echo "Installing spaCy model..."
+    python -m pip install --no-deps https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0.tar.gz
+}
 
-# Install system dependencies
-apt-get update && apt-get install -y python3-dev
+# Check if running on Streamlit Cloud
+if [ -n "$STREAMLIT_SHARING_MODE" ]; then
+    echo "Running on Streamlit Cloud..."
+    # Install system dependencies
+    apt-get update && apt-get install -y python3-dev build-essential
+    
+    # Ensure pip is up to date
+    python -m pip install --upgrade pip
+    
+    # Install numpy first
+    python -m pip install numpy==1.24.3
+fi
 
-# Download spaCy models
-python -m spacy download en_core_web_sm
-python -m spacy download en_core_web_trf || echo "Failed to download transformer model, will use small model"
+# Install spaCy model
+install_spacy_model
 
-# Verify models are installed
-python -c "import spacy; spacy.load('en_core_web_sm')" || echo "Failed to verify en_core_web_sm" 
+# Verify installation
+python -c "import spacy; spacy.load('en_core_web_sm')" || echo "Failed to verify model installation" 
