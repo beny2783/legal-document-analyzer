@@ -6,6 +6,7 @@ import re
 import logging
 from typing import Dict, List, Tuple, Set, Optional, Union
 import networkx as nx
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -14,9 +15,16 @@ logger = logging.getLogger(__name__)
 class DocumentAnalyzer:
     def __init__(self):
         try:
-            # Load larger language model for better semantic understanding
-            self.nlp = spacy.load("en_core_web_trf")  # Using transformer model for better accuracy
-            logger.info("Successfully loaded spaCy model")
+            # Try to load the transformer model first
+            try:
+                self.nlp = spacy.load("en_core_web_trf")
+                logger.info("Successfully loaded transformer model")
+            except OSError:
+                # Fallback to a smaller model if transformer model isn't available
+                logger.warning("Transformer model not found, downloading smaller model...")
+                os.system("python -m spacy download en_core_web_sm")
+                self.nlp = spacy.load("en_core_web_sm")
+                logger.info("Successfully loaded smaller model")
             
             # Initialize relationship graph
             self.relationship_graph = nx.DiGraph()
