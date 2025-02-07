@@ -1,12 +1,12 @@
-streamlit>=1.24.0
-PyPDF2>=3.0.0
-numpy==1.24.3
-spacy>=3.7.0,<3.8.0
-spacy-transformers<1.4.0
-networkx>=3.0
-torch>=2.0.0,<2.1.0
+streamlit>=1.24.0,<1.43.0
+PyPDF2>=3.0.0,<3.1.0
+numpy>=1.21.0,<1.25.0
+spacy>=3.5.0,<3.6.0
+networkx>=2.8.0,<3.0.0
+thinc>=8.1.0,<8.2.0
+# Optional dependencies
+spacy-transformers<1.2.0
+torch>=1.13.0,<2.0.0
 transformers>=4.0.0,<4.1.0
-thinc>=8.1.10,<8.2.0
-# For local development, the model will be installed via spacy download
-# For Streamlit Cloud, it will be installed from the URL
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0.tar.gz#egg=en_core_web_sm ; platform_system == "Linux" 
+# spaCy model
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0-py3-none-any.whl 
