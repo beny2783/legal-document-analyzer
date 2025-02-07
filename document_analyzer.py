@@ -15,17 +15,26 @@ logger = logging.getLogger(__name__)
 class DocumentAnalyzer:
     def __init__(self):
         try:
-            # Try to load the transformer model first
-            try:
-                self.nlp = spacy.load("en_core_web_trf")
-                logger.info("Successfully loaded transformer model")
-            except OSError:
-                # Fallback to a smaller model if transformer model isn't available
-                logger.warning("Transformer model not found, downloading smaller model...")
-                os.system("python -m spacy download en_core_web_sm")
-                self.nlp = spacy.load("en_core_web_sm")
-                logger.info("Successfully loaded smaller model")
+            # Try to load models in order of preference
+            models = ["en_core_web_trf", "en_core_web_sm"]
+            self.nlp = None
             
+            for model in models:
+                try:
+                    # Try to download if not present
+                    if not spacy.util.is_package(model):
+                        os.system(f"python -m spacy download {model}")
+                    
+                    self.nlp = spacy.load(model)
+                    logger.info(f"Successfully loaded {model}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to load {model}: {e}")
+                    continue
+            
+            if self.nlp is None:
+                raise ValueError("No spaCy model could be loaded. Please install either en_core_web_trf or en_core_web_sm")
+
             # Initialize relationship graph
             self.relationship_graph = nx.DiGraph()
             

@@ -3,12 +3,23 @@ from document_analyzer import DocumentAnalyzer
 import logging
 from typing import Dict
 
+@st.cache_resource
+def init_analyzer():
+    try:
+        return DocumentAnalyzer()
+    except Exception as e:
+        st.error(f"Failed to initialize analyzer: {str(e)}")
+        return None
+
 def main():
     st.title("Legal Document Analyzer")
     st.write("Analyze legal documents for specific scenarios")
 
-    # Initialize the analyzer
-    analyzer = DocumentAnalyzer()
+    # Initialize analyzer with error handling
+    analyzer = init_analyzer()
+    if analyzer is None:
+        st.error("Could not initialize the document analyzer. Please try again later.")
+        return
 
     # File upload section
     st.subheader("1. Upload Document")
