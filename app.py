@@ -141,13 +141,33 @@ def main():
                                 
                                 # Show detailed findings
                                 for i, (section, explanation, _, score) in enumerate(relevant_findings, 1):
-                                    with st.expander(
-                                        f"📑 Relevant Section {i} (Relevance: {score:.2f})"
-                                    ):
-                                        st.markdown("**What we found:**")
-                                        st.write(section)
-                                        st.markdown("**Why this matters:**")
-                                        st.write(explanation)
+                                    with st.expander(f"📑 Relevant Section {i} (Relevance: {score:.2f})"):
+                                        col1, col2 = st.columns([3, 2])
+                                        
+                                        with col1:
+                                            st.markdown("**📝 What we found:**")
+                                            st.write(section)
+                                        
+                                        with col2:
+                                            st.markdown("**❓ Why this matters:**")
+                                            # Generate practical implications
+                                            implications = generate_practical_implications(section, scenario, analyzer)
+                                            
+                                            # Key implications
+                                            st.markdown("**Key Points:**")
+                                            for point in implications["key_points"]:
+                                                st.markdown(f"- {point}")
+                                            
+                                            # Practical actions
+                                            st.markdown("**Actions to Consider:**")
+                                            for action in implications["actions"]:
+                                                st.markdown(f"- ✅ {action}")
+                                            
+                                            # Potential risks
+                                            if implications["risks"]:
+                                                st.markdown("**Risks to Consider:**")
+                                                for risk in implications["risks"]:
+                                                    st.markdown(f"- ⚠️ {risk}")
                 with st.spinner("🎯 Generating practical analysis..."):
                     try:
                         scenario = scenarios[0].lower().replace(" ", "_") if scenarios else None
@@ -206,6 +226,73 @@ def display_practical_analysis(findings: Dict):
     st.subheader("👉 Recommended Next Steps")
     for step in findings["next_steps"]:
         st.write(f"- {step}")
+
+def generate_practical_implications(section: str, scenario: str, analyzer: DocumentAnalyzer) -> Dict:
+    """Generate practical implications using NLP and contextual analysis"""
+    implications = {
+        "key_points": [],
+        "actions": [],
+        "risks": []
+    }
+    
+    # Use NLP to identify key elements
+    doc = analyzer.nlp(section)
+    
+    # Extract key verbs and obligations
+    obligations = [token.text for token in doc if token.dep_ == "ROOT" and token.pos_ == "VERB"]
+    subjects = [token.text for token in doc if "subj" in token.dep_]
+    objects = [token.text for token in doc if "obj" in token.dep_]
+    
+    # Identify action triggers
+    action_words = ["shall", "must", "will", "required", "agree", "undertake"]
+    risk_words = ["unless", "except", "subject to", "provided that", "failure", "breach"]
+    timing_words = ["within", "before", "after", "during", "upon"]
+    
+    # Generate key points based on sentence structure
+    for sent in doc.sents:
+        # Look for key obligations
+        if any(word in sent.text.lower() for word in action_words):
+            implications["key_points"].append(f"Requires action: {sent.text}")
+            
+        # Look for conditions and requirements
+        if any(word in sent.text.lower() for word in risk_words):
+            implications["risks"].append(f"Consider condition: {sent.text}")
+            
+        # Look for timing requirements
+        if any(word in sent.text.lower() for word in timing_words):
+            implications["actions"].append(f"Time-sensitive: {sent.text}")
+    
+    # Generate contextual actions based on scenario
+    if scenario == "founder_leaving":
+        if any(word in section.lower() for word in ["share", "equity", "stock"]):
+            implications["actions"].append("Document current shareholding")
+            implications["actions"].append("Review transfer restrictions")
+    elif scenario == "founder_joining":
+        if any(word in section.lower() for word in ["vest", "restriction", "right"]):
+            implications["actions"].append("Review vesting conditions")
+            implications["actions"].append("Understand share class rights")
+    
+    # Add general implications based on legal language
+    if any(word in section.lower() for word in ["tax", "taxation", "hmrc"]):
+        implications["actions"].append("Seek tax advice")
+        implications["risks"].append("Tax implications need consideration")
+    
+    if any(word in section.lower() for word in ["consent", "approve", "permission"]):
+        implications["actions"].append("Identify required approvals")
+        implications["risks"].append("Failure to obtain necessary approvals")
+    
+    # Clean up and deduplicate
+    for key in implications:
+        implications[key] = list(set(implications[key]))
+        implications[key] = [item for item in implications[key] if len(item) > 10]  # Remove very short items
+    
+    # Add default implications if none found
+    if not any(implications.values()):
+        implications["key_points"] = ["Review this section carefully"]
+        implications["actions"] = ["Seek legal advice if unclear"]
+        implications["risks"] = ["Ensure full understanding of obligations"]
+    
+    return implications
 
 if __name__ == "__main__":
     main() 
