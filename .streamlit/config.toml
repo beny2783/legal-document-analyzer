@@ -10,4 +10,7 @@ textColor = "#262730"
 font = "sans serif"
 
 [logger]
-level = "info" 
+level = "info"
+
+[runner]
+fastReruns = false 

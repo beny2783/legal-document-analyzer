@@ -4,9 +4,5 @@ numpy>=1.21.0,<1.25.0
 spacy>=3.5.0,<3.6.0
 networkx>=2.8.0,<3.0.0
 thinc>=8.1.0,<8.2.0
-# Optional dependencies
-spacy-transformers<1.2.0
-torch>=1.13.0,<2.0.0
-transformers>=4.0.0,<4.1.0
 # spaCy model
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0-py3-none-any.whl 
