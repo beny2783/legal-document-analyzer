@@ -3,6 +3,9 @@ from document_analyzer import DocumentAnalyzer
 import logging
 from typing import Dict
 
+# Set up logging
+logger = logging.getLogger(__name__)
+
 @st.cache_resource
 def init_analyzer():
     try:
@@ -89,7 +92,13 @@ def main():
                 for i, scenario in enumerate(scenarios, 1):
                     st.write(f"Analyzing {scenario}...")
                     use_case = scenario.lower().replace(" ", "_")
-                    findings = analyzer.analyze_document(text, use_case)
+                    context = {
+                        "tenure": st.session_state.get('tenure', ''),
+                        "leaving_type": st.session_state.get('leaving_type', ''),
+                        "equity": st.session_state.get('equity', ''),
+                        "joining_type": st.session_state.get('joining_type', '')
+                    }
+                    findings = analyzer.analyze_document(text, use_case, context=context)
                     if findings:
                         all_findings.extend([
                             (section, explanation, scenario, relevance_score)
@@ -172,11 +181,34 @@ def main():
                     try:
                         scenario = scenarios[0].lower().replace(" ", "_") if scenarios else None
                         if scenario:
-                            practical_analysis = analyzer.analyze_practical_implications(text, scenario)
-                            if practical_analysis:
-                                display_practical_analysis(practical_analysis)
+                            context = {
+                                "tenure": st.session_state.get('tenure', ''),
+                                "leaving_type": st.session_state.get('leaving_type', ''),
+                                "equity": st.session_state.get('equity', ''),
+                                "joining_type": st.session_state.get('joining_type', '')
+                            }
+                            
+                            # Add debug logging
+                            logger.info(f"Starting practical analysis for scenario: {scenario}")
+                            logger.info(f"Context: {context}")
+                            
+                            try:
+                                practical_analysis = analyzer.analyze_practical_implications(text, scenario, context)
+                                logger.info(f"Practical analysis results: {practical_analysis}")
+                                
+                                if practical_analysis and any(practical_analysis.values()):
+                                    display_practical_analysis(practical_analysis)
+                                else:
+                                    st.warning("No specific implications found. This might mean:")
+                                    st.write("- The document doesn't contain explicit provisions for this scenario")
+                                    st.write("- The relevant terms use different wording")
+                                    st.write("- The scenario might be covered under general terms")
+                            except Exception as e:
+                                logger.error(f"Error in analyze_practical_implications: {str(e)}", exc_info=True)
+                                st.error(f"Error analyzing implications: {str(e)}")
+                                
                     except Exception as e:
-                        logger.error(f"Error in practical analysis: {str(e)}")
+                        logger.error(f"Error in practical analysis wrapper: {str(e)}", exc_info=True)
                         st.warning("Could not complete practical analysis. Please review the findings above.")
                 
                 # Show completion message
@@ -193,7 +225,7 @@ def main():
             logging.error(f"Error processing document: {str(e)}", exc_info=True)
 
 def display_practical_analysis(findings: Dict):
-    """Display practical analysis results"""
+    """Display practical analysis results with context-specific calculations"""
     
     # Overview
     st.subheader("📋 Key Findings")
@@ -227,6 +259,47 @@ def display_practical_analysis(findings: Dict):
     for step in findings["next_steps"]:
         st.write(f"- {step}")
 
+    # Display context-specific analysis if available
+    if "context_specific_analysis" in findings and findings["context_specific_analysis"]:
+        st.subheader("📊 Analysis Based on Your Specific Situation")
+        
+        context = findings["context_specific_analysis"]
+        
+        # Display equity calculations
+        if "equity_calculation" in context:
+            equity = context["equity_calculation"]
+            with st.expander("🔍 Equity Status", expanded=True):
+                if "error" in equity:
+                    st.warning(equity["error"])
+                else:
+                    # Get vesting status safely
+                    vesting_status = equity.get("vested_percentage", {}).get("vesting_status", {})
+                    st.markdown(f"**Vesting Status:** {vesting_status.get('status', 'Not specified')}")
+                    st.markdown(f"**Impact:** {vesting_status.get('impact', 'Not specified')}")
+                    
+                    # Show vesting percentage
+                    vested = equity.get("vested_percentage", {})
+                    if vested:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Vested Percentage", 
+                                    f"{vested.get('vested_percent', 0)}%")
+                        with col2:
+                            st.metric("Forfeited", 
+                                    f"{vested.get('forfeited_percent', 100)}%")
+                        if "impact" in vested:
+                            st.info(vested["impact"])
+        
+        # Display leaver status implications
+        if "leaver_status" in context:
+            leaver = context["leaver_status"]
+            with st.expander("📑 Leaver Status Analysis", expanded=True):
+                st.markdown(f"**Category:** {leaver['category']}")
+                st.markdown("**Implications:**")
+                for imp in leaver['implications']:
+                    st.markdown(f"- {imp}")
+                st.markdown(f"**Valuation Basis:** {leaver['valuation_basis']}")
+
 def generate_practical_implications(section: str, scenario: str, analyzer: DocumentAnalyzer) -> Dict:
     """Generate practical implications using NLP and contextual analysis"""
     implications = {
@@ -234,6 +307,27 @@ def generate_practical_implications(section: str, scenario: str, analyzer: Docum
         "actions": [],
         "risks": []
     }
+    
+    # Get additional context if available
+    if scenario == "founder_leaving":
+        tenure = st.session_state.get('tenure', '')
+        leaving_type = st.session_state.get('leaving_type', '')
+        
+        # Add context-specific implications
+        if leaving_type == "Termination":
+            implications["risks"].append("Review bad leaver provisions carefully")
+            implications["actions"].append("Document compliance with notice periods")
+        elif tenure and float(tenure.split()[0]) < 2:  # If less than 2 years
+            implications["risks"].append("Early departure may affect vesting rights")
+            
+    elif scenario == "founder_joining":
+        equity = st.session_state.get('equity', '')
+        joining_type = st.session_state.get('joining_type', '')
+        
+        if joining_type == "Co-founder with limited rights":
+            implications["actions"].append("Review voting rights limitations")
+        if equity and float(equity.replace('%', '')) > 25:
+            implications["actions"].append("Consider minority shareholder protections")
     
     # Use NLP to identify key elements
     doc = analyzer.nlp(section)

@@ -14,45 +14,63 @@ logger = logging.getLogger(__name__)
 
 class DocumentAnalyzer:
     def __init__(self):
-        try:
-            # Try to load the small model first
-            try:
-                self.nlp = spacy.load("en_core_web_sm")
-                logger.info("Successfully loaded small model")
-            except OSError:
-                logger.info("Model not found, downloading...")
-                # Use subprocess instead of os.system for better error handling
-                import subprocess
-                import sys
-                subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-                self.nlp = spacy.load("en_core_web_sm")
-                logger.info("Successfully downloaded and loaded small model")
+        """Initialize the analyzer with better defaults and validation"""
+        self.nlp = spacy.load("en_core_web_sm")
+        
+        # Define practical scenarios with more specific requirements
+        self.practical_scenarios = {
+            "founder_leaving": {
+                "required_elements": [
+                    "leaver provisions",
+                    "vesting",
+                    "share valuation",
+                    "transfer process",
+                    "post-exit restrictions",
+                    "tax considerations"
+                ],
+                "critical_elements": ["leaver provisions", "vesting"],  # Must-have elements
+                "validation_rules": {
+                    "tenure": r"^\d+(\.\d+)?\s*(year|month)s?$",
+                    "equity": r"^\d+(\.\d+)?%?$"
+                }
+            },
+            "founder_joining": {
+                "required_elements": [
+                    "share rights",
+                    "voting rights",
+                    "vesting schedule",
+                    "reserved matters",
+                    "transfer restrictions"
+                ],
+                "critical_elements": ["share rights", "voting rights"],
+                "validation_rules": {
+                    "equity": r"^\d+(\.\d+)?%?$",
+                    "joining_type": ["Co-founder with equal rights", "Co-founder with limited rights"]
+                }
+            }
+        }
 
-            # Initialize other components
-            self.relationship_graph = nx.DiGraph()
-            
-            # Define clause relationships
-            self.clause_relationships = {
-                "depends_on": ["subject to", "conditional upon", "provided that"],
-                "modifies": ["amends", "changes", "updates"],
-                "excludes": ["excludes", "does not apply", "except"],
-                "includes": ["includes", "comprises", "contains"],
-                "references": ["refers to", "as defined in", "pursuant to"]
-            }
-            
-            # Custom entity patterns for legal concepts
-            self.legal_entities = {
-                "OBLIGATION": ["shall", "must", "will be required to"],
-                "PERMISSION": ["may", "is entitled to", "has the right to"],
-                "PROHIBITION": ["shall not", "must not", "is prohibited from"],
-                "CONDITION": ["if", "when", "subject to", "provided that"],
-                "EXCEPTION": ["except", "unless", "excluding", "other than"],
-                "DEFINITION": ["means", "refers to", "is defined as"]
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize NLP components: {e}")
-            raise
+        # Initialize other components
+        self.relationship_graph = nx.DiGraph()
+        
+        # Define clause relationships
+        self.clause_relationships = {
+            "depends_on": ["subject to", "conditional upon", "provided that"],
+            "modifies": ["amends", "changes", "updates"],
+            "excludes": ["excludes", "does not apply", "except"],
+            "includes": ["includes", "comprises", "contains"],
+            "references": ["refers to", "as defined in", "pursuant to"]
+        }
+        
+        # Custom entity patterns for legal concepts
+        self.legal_entities = {
+            "OBLIGATION": ["shall", "must", "will be required to"],
+            "PERMISSION": ["may", "is entitled to", "has the right to"],
+            "PROHIBITION": ["shall not", "must not", "is prohibited from"],
+            "CONDITION": ["if", "when", "subject to", "provided that"],
+            "EXCEPTION": ["except", "unless", "excluding", "other than"],
+            "DEFINITION": ["means", "refers to", "is defined as"]
+        }
         
         # Update use cases to include tax implications
         self.use_cases = {
@@ -130,34 +148,6 @@ class DocumentAnalyzer:
             }
         }
 
-        # Add practical scenarios that combine multiple aspects
-        self.practical_scenarios = {
-            "founder_leaving": {
-                "key_questions": [
-                    "What happens to your shares?",
-                    "How will they be valued?",
-                    "What are the tax implications?",
-                    "What restrictions apply after leaving?",
-                    "What approvals are needed?"
-                ],
-                "required_elements": [
-                    "leaver provisions",
-                    "share valuation",
-                    "transfer process",
-                    "tax considerations",
-                    "post-exit restrictions"
-                ],
-                "action_items": [
-                    "Board approval requirements",
-                    "Valuation process",
-                    "Tax clearances needed",
-                    "Notice periods",
-                    "Required documentation"
-                ]
-            },
-            # ... similar for other scenarios
-        }
-
     def extract_text_from_pdf(self, pdf_file) -> str:
         """Extract text content from uploaded PDF file"""
         try:
@@ -202,10 +192,13 @@ class DocumentAnalyzer:
         
         return min(score, 1.0)
 
-    def analyze_document(self, text: str, use_case: str) -> List[Tuple[str, str, float]]:
-        """Analyze document text and return relevant sections with explanations and relevance scores"""
-        logger.info(f"Starting analysis for use case: {use_case}")
-        logger.info(f"Document length: {len(text)} characters")
+    def analyze_document(self, text: str, use_case: str, context: Dict = None) -> List[Tuple[str, str, float]]:
+        """Analyze document with comprehensive context awareness"""
+        logger.info(f"Starting analysis for use case: {use_case} with context: {context}")
+        
+        # Adjust analysis based on context
+        if context:
+            self._adjust_analysis_parameters(use_case, context)
         
         doc = self.nlp(text)
         findings = []
@@ -214,74 +207,138 @@ class DocumentAnalyzer:
         if not case_info:
             logger.warning(f"No case info found for use case: {use_case}")
             return findings
-            
-        keywords = case_info.get("keywords", [])
-        patterns = case_info.get("patterns", [])
         
-        logger.info(f"Searching for {len(keywords)} keywords and {len(patterns)} patterns")
-
-        # Improved text splitting logic
-        # First try to split by double newlines
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        # Process document with context awareness
+        paragraphs = self._split_text_into_paragraphs(text)
         
-        # If we only got one paragraph, try single newlines
-        if len(paragraphs) <= 1:
-            paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
-        
-        # If still only one paragraph, try splitting by periods
-        if len(paragraphs) <= 1:
-            paragraphs = [p.strip() + '.' for p in text.split('.') if p.strip()]
-
-        logger.info(f"Document split into {len(paragraphs)} sections")
-        logger.debug(f"First few sections: {paragraphs[:3]}")
-
-        # Process chunks of text instead of single paragraphs
-        chunk_size = 500  # characters
+        # Process chunks with context
+        chunk_size = 500
         current_chunk = ""
         
         for paragraph in paragraphs:
             current_chunk += paragraph + "\n"
-            
             if len(current_chunk) >= chunk_size:
-                # Process the current chunk
-                self._analyze_chunk(current_chunk, keywords, patterns, findings, use_case)
+                self._analyze_chunk(current_chunk, case_info, findings, use_case, context)
                 current_chunk = ""
         
-        # Process any remaining text
         if current_chunk:
-            self._analyze_chunk(current_chunk, keywords, patterns, findings, use_case)
-
-        logger.info(f"Analysis complete. Found {len(findings)} relevant sections")
-
-        # Sort findings by relevance score
-        findings.sort(key=lambda x: x[2], reverse=True)
+            self._analyze_chunk(current_chunk, case_info, findings, use_case, context)
         
-        # Limit to top N most relevant findings
-        MAX_FINDINGS = 10
-        return findings[:MAX_FINDINGS]
+        # Sort findings considering context
+        findings.sort(key=lambda x: self._calculate_contextual_relevance(x[0], x[2], use_case, context), reverse=True)
+        
+        return findings[:10]  # Return top 10 most relevant findings
 
-    def _analyze_chunk(self, text: str, keywords: List[str], patterns: List[str], 
-                      findings: List[Tuple[str, str, float]], use_case: str):
+    def _adjust_analysis_parameters(self, use_case: str, context: Dict):
+        """Adjust analysis parameters based on context"""
+        if use_case == "founder_leaving":
+            leaving_type = context.get("leaving_type", "")
+            tenure = context.get("tenure", "")
+            
+            # Adjust keywords and patterns based on leaving type
+            if leaving_type == "Termination":
+                self.use_cases[use_case]["keywords"].extend([
+                    "misconduct", "termination", "bad leaver",
+                    "immediate effect", "cause", "summary dismissal"
+                ])
+                self.use_cases[use_case]["patterns"].extend([
+                    r"terminat(ion|e)\s+for\s+cause",
+                    r"summary\s+dismiss(al|ed)"
+                ])
+            
+            # Add early departure considerations
+            if tenure:
+                try:
+                    tenure_years = float(tenure.split()[0])
+                    if tenure_years < 2:
+                        self.use_cases[use_case]["keywords"].extend([
+                            "vesting", "cliff", "acceleration",
+                            "unvested", "forfeiture"
+                        ])
+                except ValueError:
+                    pass
+                
+        elif use_case == "founder_joining":
+            joining_type = context.get("joining_type", "")
+            equity = context.get("equity", "")
+            
+            # Adjust for joining type
+            if joining_type == "Co-founder with limited rights":
+                self.use_cases[use_case]["keywords"].extend([
+                    "voting rights", "class rights", "limited rights",
+                    "non-voting", "observer rights"
+                ])
+            
+            # Add minority protection considerations
+            if equity:
+                try:
+                    equity_pct = float(equity.replace('%', ''))
+                    if equity_pct > 25:
+                        self.use_cases[use_case]["keywords"].extend([
+                            "minority protection", "reserved matters",
+                            "veto rights", "tag along", "drag along"
+                        ])
+                except ValueError:
+                    pass
+
+    def _calculate_contextual_relevance(self, text: str, base_score: float, use_case: str, context: Dict) -> float:
+        """Calculate relevance score with context consideration"""
+        if not context:
+            return base_score
+        
+        context_multiplier = 1.0
+        
+        if use_case == "founder_leaving":
+            # Increase relevance for termination-related sections if leaving type is termination
+            if context.get("leaving_type") == "Termination" and any(word in text.lower() for word in ["terminate", "dismissal", "cause"]):
+                context_multiplier *= 1.5
+            
+            # Increase relevance for vesting sections for early departures
+            if context.get("tenure"):
+                try:
+                    tenure_years = float(context["tenure"].split()[0])
+                    if tenure_years < 2 and any(word in text.lower() for word in ["vest", "cliff"]):
+                        context_multiplier *= 1.3
+                except ValueError:
+                    pass
+                
+        elif use_case == "founder_joining":
+            # Increase relevance for rights sections if joining with limited rights
+            if context.get("joining_type") == "Co-founder with limited rights" and any(word in text.lower() for word in ["voting", "rights", "limited"]):
+                context_multiplier *= 1.4
+            
+            # Increase relevance for protection clauses with significant equity
+            if context.get("equity"):
+                try:
+                    equity_pct = float(context["equity"].replace('%', ''))
+                    if equity_pct > 25 and any(word in text.lower() for word in ["protect", "minority", "reserved"]):
+                        context_multiplier *= 1.3
+                except ValueError:
+                    pass
+        
+        return min(base_score * context_multiplier, 1.0)
+
+    def _analyze_chunk(self, text: str, case_info: Dict, findings: List[Tuple[str, str, float]], use_case: str, context: Dict):
         """Analyze a chunk of text for matches"""
         # Check for keyword matches
-        for keyword in keywords:
+        for keyword in case_info.get("keywords", []):
             if keyword.lower() in text.lower():
                 logger.info(f"Found keyword match: {keyword}")
                 logger.debug(f"Matching text: {text[:200]}...")
                 score = self.calculate_relevance_score(text, keyword)
                 if score > 0.3:  # Minimum relevance threshold
-                    explanation = self.generate_explanation(keyword, use_case)
+                    explanation = self.generate_explanation(keyword, use_case, context)
                     findings.append((text.strip(), explanation, score))
                     break
         
         # Check for pattern matches
-        for pattern in patterns:
+        for pattern in case_info.get("patterns", []):
             if re.search(pattern, text, re.IGNORECASE):
                 logger.info(f"Found pattern match: {pattern}")
                 logger.debug(f"Matching text: {text[:200]}...")
                 score = self.calculate_relevance_score(text, pattern, pattern)
                 if score > 0.3:  # Minimum relevance threshold
-                    explanation = self.generate_explanation(pattern, use_case)
+                    explanation = self.generate_explanation(pattern, use_case, context)
                     findings.append((text.strip(), explanation, score))
                     break
 
@@ -458,111 +515,150 @@ class DocumentAnalyzer:
         # Implementation using semantic understanding and clause structure
         pass
 
-    def analyze_practical_implications(self, text: str, scenario: str) -> Dict:
-        """Analyze practical implications and required actions"""
-        scenario_info = self.practical_scenarios.get(scenario, {})
+    def analyze_practical_implications(self, text: str, scenario: str, context: Dict = None) -> Dict:
+        """Analyze practical implications with specific context-based calculations"""
+        logger.info(f"Analyzing practical implications for scenario: {scenario}")
+        
         findings = {
             "key_findings": [],
             "missing_elements": [],
             "action_items": [],
             "risks": [],
-            "next_steps": []
+            "next_steps": [],
+            "context_specific_analysis": {}
         }
         
-        # Analyze each required element
-        for element in scenario_info.get("required_elements", []):
+        # Get scenario requirements
+        scenario_info = self.practical_scenarios.get(scenario, {})
+        required_elements = scenario_info.get("required_elements", [])
+        
+        # Analyze key findings
+        for element in required_elements:
             relevant_sections = self._find_relevant_sections(text, element)
             if relevant_sections:
                 findings["key_findings"].append({
                     "element": element,
-                    "content": relevant_sections,
-                    "practical_impact": self._analyze_practical_impact(relevant_sections, element)
+                    "content": relevant_sections[0],  # Most relevant section
+                    "practical_impact": self._analyze_practical_impact(element, relevant_sections[0], context)
                 })
             else:
                 findings["missing_elements"].append(element)
-
-        # Identify required actions
-        findings["action_items"] = self._identify_required_actions(text, scenario)
         
-        # Assess risks
-        findings["risks"] = self._assess_risks(text, scenario)
+        # Add action items based on context
+        if context:
+            if scenario == "founder_leaving":
+                findings["action_items"] = [
+                    f"Provide {context.get('leaving_type', 'departure')} notice",
+                    "Document current shareholding",
+                    "Calculate vested shares",
+                    "Review transfer requirements",
+                    "Seek tax advice on share disposal",
+                    "Check post-exit restrictions"
+                ]
+                
+                # Add specific risks based on leaving type
+                if context.get("leaving_type") == "Termination":
+                    findings["risks"].extend([
+                        {"severity": "High", "description": "Risk of bad leaver classification"},
+                        {"severity": "High", "description": "Potential loss of unvested shares"},
+                        {"severity": "Medium", "description": "Valuation may be at nominal value"}
+                    ])
+                
+                # Add tenure-specific risks
+                if context.get("tenure"):
+                    try:
+                        tenure_months = float(context["tenure"].split()[0]) * 12
+                        if tenure_months < 12:
+                            findings["risks"].append({
+                                "severity": "High",
+                                "description": "Pre-cliff departure - risk of total share forfeiture"
+                            })
+                    except ValueError:
+                        pass
         
         # Generate next steps
-        findings["next_steps"] = self._generate_next_steps(findings)
+        findings["next_steps"] = self._generate_next_steps(findings, context)
         
+        # Add context-specific analysis
+        if context:
+            if scenario == "founder_leaving":
+                findings["context_specific_analysis"] = self._analyze_leaving_context(text, context)
+            elif scenario == "founder_joining":
+                findings["context_specific_analysis"] = self._analyze_joining_context(text, context)
+        
+        logger.info(f"Analysis complete. Found {len(findings['key_findings'])} key findings")
         return findings
 
-    def _analyze_practical_impact(self, sections: List[str], element: str) -> str:
-        """Analyze the practical impact of provisions"""
-        impacts = {
-            "leaver provisions": "These provisions determine your rights and obligations when leaving the company.",
-            "share valuation": "This defines how your shares will be valued upon departure.",
-            "transfer process": "This outlines the steps you must follow to transfer your shares.",
-            "tax considerations": "This affects your tax position and potential liabilities.",
-            "post-exit restrictions": "These are the limitations on your activities after leaving."
-        }
-        return impacts.get(element, f"This affects how {element} will be handled.")
-
-    def _identify_required_actions(self, text: str, scenario: str) -> List[str]:
-        """Identify specific actions required"""
-        common_actions = {
-            "founder_leaving": [
-                "Provide written notice of departure",
-                "Request share valuation",
-                "Seek tax advice on share disposal",
-                "Review non-compete restrictions",
-                "Prepare transfer documentation"
-            ],
-            "founder_joining": [
-                "Review share vesting terms",
-                "Complete share subscription agreement",
-                "Consider tax implications of share acquisition",
-                "Review shareholder agreement",
-                "Complete necessary Companies House filings"
-            ]
-        }
-        return common_actions.get(scenario, [])
-
-    def _assess_risks(self, text: str, scenario: str) -> List[Dict]:
-        """Assess potential risks and issues"""
-        common_risks = {
-            "founder_leaving": [
-                {"description": "Bad leaver provisions may affect share value", "severity": "High"},
-                {"description": "Non-compete restrictions may limit future opportunities", "severity": "Medium"},
-                {"description": "Tax implications of share disposal", "severity": "High"},
-                {"description": "Potential disputes over share valuation", "severity": "Medium"},
-                {"description": "Confidentiality obligations", "severity": "Medium"}
-            ],
-            "founder_joining": [
-                {"description": "Vesting schedule risks", "severity": "High"},
-                {"description": "Share rights limitations", "severity": "Medium"},
-                {"description": "Future dilution risks", "severity": "Medium"},
-                {"description": "Tax implications of share acquisition", "severity": "High"},
-                {"description": "Drag-along obligations", "severity": "Medium"}
-            ]
-        }
-        return common_risks.get(scenario, [])
-
-    def _generate_next_steps(self, findings: Dict) -> List[str]:
-        """Generate practical next steps"""
-        next_steps = [
-            "1. Review all identified sections carefully",
-            "2. Seek professional legal advice on key terms",
-            "3. Consult with tax advisor on implications"
-        ]
+    def _analyze_practical_impact(self, element: str, section: str, context: Dict = None) -> Dict:
+        """Enhanced practical impact analysis with confidence scoring"""
+        if context is None:
+            context = {}
         
-        # Add steps based on missing elements
+        impact = {
+            "description": "",
+            "severity": "Low",
+            "confidence": 0.0,
+            "supporting_evidence": []
+        }
+        
+        # Process the section with NLP
+        doc = self.nlp(section)
+        
+        # Extract key phrases and patterns
+        key_phrases = self._extract_key_phrases(doc)
+        patterns = self._identify_legal_patterns(doc)
+        
+        # Calculate confidence based on evidence
+        evidence_count = len(key_phrases) + len(patterns)
+        impact["confidence"] = min(0.3 + (evidence_count * 0.1), 1.0)
+        
+        # Add supporting evidence
+        impact["supporting_evidence"].extend(key_phrases)
+        
+        # Determine severity and description based on context and evidence
+        severity, description = self._evaluate_impact_severity(
+            element, key_phrases, patterns, context
+        )
+        
+        impact["severity"] = severity
+        impact["description"] = description
+        
+        return impact
+
+    def _generate_next_steps(self, findings: Dict, context: Dict) -> List[str]:
+        """Generate practical next steps based on findings and context"""
+        next_steps = []
+        
+        # Add steps for missing elements
         if findings["missing_elements"]:
-            next_steps.append("4. Clarify the following undefined areas:")
+            next_steps.append("1. Seek clarification on the following points:")
             for element in findings["missing_elements"]:
                 next_steps.append(f"   - {element}")
         
-        # Add steps based on risks
+        # Add steps for high-risk items
         high_risks = [r for r in findings["risks"] if r["severity"] == "High"]
         if high_risks:
-            next_steps.append("5. Address high-priority risks:")
+            next_steps.append("2. Address high-priority risks:")
             for risk in high_risks:
                 next_steps.append(f"   - {risk['description']}")
+        
+        # Add context-specific steps
+        if context:
+            if context.get("leaving_type") == "Termination":
+                next_steps.extend([
+                    "3. Document compliance with notice periods",
+                    "4. Prepare for share valuation process",
+                    "5. Review post-exit restrictions"
+                ])
+        
+        # Add general steps if list is empty
+        if not next_steps:
+            next_steps = [
+                "1. Review all identified sections carefully",
+                "2. Seek professional legal advice",
+                "3. Consult with tax advisor",
+                "4. Document all decisions and communications"
+            ]
         
         return next_steps
 
@@ -664,5 +760,447 @@ class DocumentAnalyzer:
     def _extract_definitions(self, doc: Doc) -> List[str]:
         """Extract definitions from the document"""
         return []
+
+    def _split_text_into_paragraphs(self, text: str) -> List[str]:
+        """Split text into paragraphs using multiple strategies"""
+        # First try to split by double newlines
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        
+        # If we only got one paragraph, try single newlines
+        if len(paragraphs) <= 1:
+            paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+        
+        # If still only one paragraph, try splitting by periods
+        if len(paragraphs) <= 1:
+            paragraphs = [p.strip() + '.' for p in text.split('.') if p.strip()]
+
+        logger.info(f"Document split into {len(paragraphs)} sections")
+        logger.debug(f"First few sections: {paragraphs[:3]}")
+        
+        return paragraphs
+
+    def _extract_vesting_period(self, vesting_matches: List[str]) -> float:
+        """Extract vesting period from document text"""
+        # Default to 48 months (4 years) if not found
+        default_period = 48.0
+        
+        for text in vesting_matches:
+            # Look for patterns like "4 year vesting" or "48 month vesting"
+            year_match = re.search(r'(\d+)\s*year\s*vest', text.lower())
+            month_match = re.search(r'(\d+)\s*month\s*vest', text.lower())
+            
+            if year_match:
+                return float(year_match.group(1)) * 12
+            if month_match:
+                return float(month_match.group(1))
+        
+        return default_period
+
+    def _extract_cliff_period(self, vesting_matches: List[str]) -> float:
+        """Extract cliff period from document text"""
+        # Default to 12 months (1 year) if not found
+        default_cliff = 12.0
+        
+        for text in vesting_matches:
+            # Look for patterns like "1 year cliff" or "12 month cliff"
+            year_match = re.search(r'(\d+)\s*year\s*cliff', text.lower())
+            month_match = re.search(r'(\d+)\s*month\s*cliff', text.lower())
+            
+            if year_match:
+                return float(year_match.group(1)) * 12
+            if month_match:
+                return float(month_match.group(1))
+        
+        return default_cliff
+
+    def _determine_leaver_category(self, leaving_type: str, leaver_provisions: List[str]) -> str:
+        """Determine leaver category based on leaving type and provisions"""
+        if leaving_type == "Termination":
+            # Look for bad leaver definitions
+            if any("bad leaver" in text.lower() and "termination" in text.lower() 
+                   for text in leaver_provisions):
+                return "Bad Leaver"
+        elif leaving_type == "Voluntary departure":
+            # Look for intermediate leaver definitions
+            if any("intermediate leaver" in text.lower() for text in leaver_provisions):
+                return "Intermediate Leaver"
+        
+        # Default to good leaver if no specific provisions found
+        return "Good Leaver"
+
+    def _analyze_leaver_implications(self, leaving_type: str, leaver_provisions: List[str]) -> List[str]:
+        """Analyze implications based on leaver type"""
+        implications = []
+        
+        for provision in leaver_provisions:
+            if leaving_type == "Termination" and "bad leaver" in provision.lower():
+                implications.extend([
+                    "Shares must be transferred within 30 days",
+                    "No acceleration of unvested shares",
+                    "Valuation likely at nominal value"
+                ])
+            elif "good leaver" in provision.lower():
+                implications.extend([
+                    "May retain vested shares",
+                    "Possible acceleration of unvested shares",
+                    "Valuation likely at fair market value"
+                ])
+        
+        return list(set(implications))  # Remove duplicates
+
+    def _extract_valuation_basis(self, leaving_type: str, leaver_provisions: List[str]) -> str:
+        """Extract valuation basis from leaver provisions"""
+        for provision in leaver_provisions:
+            if leaving_type == "Termination" and "bad leaver" in provision.lower():
+                if "nominal value" in provision.lower():
+                    return "Nominal value per Bad Leaver provisions"
+                elif "fair value" in provision.lower():
+                    return "Fair market value despite Bad Leaver status"
+            elif "good leaver" in provision.lower():
+                if "fair value" in provision.lower() or "market value" in provision.lower():
+                    return "Fair market value per Good Leaver provisions"
+        
+        # Default response if no specific valuation basis found
+        return "Standard valuation process applies"
+
+    def _analyze_leaving_context(self, text: str, context: Dict) -> Dict:
+        """Analyze specific implications for leaving founder"""
+        analysis = {
+            "equity_calculation": {},
+            "notice_requirements": {},
+            "restrictions": {},
+            "key_dates": {}
+        }
+        
+        # Extract vesting information
+        vesting_matches = self._find_relevant_sections(text, "vesting")
+        vesting_period = self._extract_vesting_period(vesting_matches)
+        cliff_period = self._extract_cliff_period(vesting_matches)
+        
+        # Calculate equity implications
+        tenure = context.get("tenure", "")
+        if tenure:
+            try:
+                tenure_months = float(tenure.split()[0]) * 12
+                analysis["equity_calculation"] = {
+                    "total_tenure_months": tenure_months,
+                    "vesting_period_months": vesting_period,
+                    "cliff_period_months": cliff_period,
+                    "vested_percentage": self._calculate_vested_percentage(tenure_months, vesting_period, cliff_period)
+                }
+            except ValueError:
+                analysis["equity_calculation"] = {
+                    "error": "Could not calculate equity due to invalid tenure format"
+                }
+        
+        # Extract notice requirements
+        notice_sections = self._find_relevant_sections(text, "notice")
+        if notice_sections:
+            analysis["notice_requirements"] = {
+                "notice_period": self._extract_notice_period(notice_sections),
+                "special_requirements": self._extract_special_requirements(notice_sections)
+            }
+        
+        # Extract post-exit restrictions
+        restriction_sections = self._find_relevant_sections(text, "restriction")
+        if restriction_sections:
+            analysis["restrictions"] = {
+                "non_compete": self._extract_non_compete_terms(restriction_sections),
+                "non_solicit": self._extract_non_solicit_terms(restriction_sections),
+                "confidentiality": self._extract_confidentiality_terms(restriction_sections)
+            }
+        
+        return analysis
+
+    def _calculate_vested_percentage(self, tenure_months: float, vesting_period: float, cliff_period: float) -> Dict:
+        """Calculate vested percentage based on tenure and vesting schedule"""
+        result = {
+            "vested_percent": 0,
+            "forfeited_percent": 100,
+            "vesting_status": {
+                "status": "",
+                "impact": ""
+            }
+        }
+        
+        if tenure_months < cliff_period:
+            result.update({
+                "vesting_status": {
+                    "status": "Pre-cliff period",
+                    "impact": f"No shares vested - cliff period of {cliff_period} months not reached"
+                }
+            })
+        elif tenure_months >= vesting_period:
+            result.update({
+                "vested_percent": 100,
+                "forfeited_percent": 0,
+                "vesting_status": {
+                    "status": "Fully vested",
+                    "impact": "All shares vested"
+                }
+            })
+        else:
+            vested_percent = (tenure_months / vesting_period) * 100
+            result.update({
+                "vested_percent": round(vested_percent, 2),
+                "forfeited_percent": round(100 - vested_percent, 2),
+                "vesting_status": {
+                    "status": "Partially vested",
+                    "impact": f"Vesting in progress - {round(vested_percent, 2)}% vested"
+                }
+            })
+        
+        return result
+
+    def _extract_notice_period(self, notice_sections: List[str]) -> str:
+        """Extract notice period requirements"""
+        for section in notice_sections:
+            # Look for patterns like "X months notice" or "X weeks notice"
+            month_match = re.search(r'(\d+)\s*month[s]?\s*notice', section.lower())
+            week_match = re.search(r'(\d+)\s*week[s]?\s*notice', section.lower())
+            
+            if month_match:
+                return f"{month_match.group(1)} months"
+            if week_match:
+                return f"{week_match.group(1)} weeks"
+        
+        return "Standard notice period applies"
+
+    def _extract_special_requirements(self, notice_sections: List[str]) -> List[str]:
+        """Extract any special notice requirements"""
+        requirements = []
+        keywords = ["writing", "board", "approval", "immediate", "garden leave"]
+        
+        for section in notice_sections:
+            for keyword in keywords:
+                if keyword in section.lower():
+                    requirements.append(f"Requires {keyword}")
+        
+        return requirements
+
+    def _extract_non_compete_terms(self, sections: List[str]) -> Dict:
+        """Extract non-compete restrictions"""
+        return {
+            "duration": self._extract_restriction_duration(sections, "non-compete"),
+            "scope": self._extract_restriction_scope(sections, "non-compete")
+        }
+
+    def _extract_non_solicit_terms(self, sections: List[str]) -> Dict:
+        """Extract non-solicitation restrictions"""
+        return {
+            "duration": self._extract_restriction_duration(sections, "non-solicit"),
+            "scope": self._extract_restriction_scope(sections, "non-solicit")
+        }
+
+    def _extract_confidentiality_terms(self, sections: List[str]) -> Dict:
+        """Extract confidentiality requirements"""
+        return {
+            "duration": "Indefinite",  # Usually confidentiality is indefinite
+            "scope": self._extract_restriction_scope(sections, "confidential")
+        }
+
+    def _extract_restriction_duration(self, sections: List[str], restriction_type: str) -> str:
+        """Extract duration of a specific restriction"""
+        for section in sections:
+            if restriction_type in section.lower():
+                month_match = re.search(r'(\d+)\s*month[s]?', section.lower())
+                year_match = re.search(r'(\d+)\s*year[s]?', section.lower())
+                
+                if month_match:
+                    return f"{month_match.group(1)} months"
+                if year_match:
+                    return f"{year_match.group(1)} years"
+        
+        return "Duration not specified"
+
+    def _extract_restriction_scope(self, sections: List[str], restriction_type: str) -> str:
+        """Extract scope of a specific restriction"""
+        for section in sections:
+            if restriction_type in section.lower():
+                # Return the relevant sentence containing the scope
+                sentences = section.split('.')
+                for sentence in sentences:
+                    if restriction_type in sentence.lower():
+                        return sentence.strip()
+        
+        return "Scope not explicitly defined"
+
+    def _validate_context(self, scenario: str, context: Dict) -> Tuple[bool, List[str]]:
+        """Validate context data against scenario requirements"""
+        if scenario not in self.practical_scenarios:
+            return False, ["Invalid scenario"]
+        
+        errors = []
+        rules = self.practical_scenarios[scenario].get("validation_rules", {})
+        
+        for field, rule in rules.items():
+            value = context.get(field)
+            if not value:
+                continue
+            
+            if isinstance(rule, str):  # Regex pattern
+                if not re.match(rule, str(value)):
+                    errors.append(f"Invalid {field} format")
+            elif isinstance(rule, list):  # Enumerated values
+                if value not in rule:
+                    errors.append(f"Invalid {field} value")
+        
+        return len(errors) == 0, errors
+
+    def _preprocess_context(self, context: Dict) -> Dict:
+        """Standardize and clean context data"""
+        if not context:
+            return {}
+        
+        processed = {}
+        
+        # Standardize tenure format
+        if "tenure" in context:
+            tenure = context["tenure"]
+            if "year" in tenure.lower():
+                months = float(tenure.split()[0]) * 12
+                processed["tenure_months"] = months
+            elif "month" in tenure.lower():
+                processed["tenure_months"] = float(tenure.split()[0])
+        
+        # Standardize equity format
+        if "equity" in context:
+            equity = context["equity"].replace("%", "")
+            processed["equity_percentage"] = float(equity)
+        
+        # Copy other fields
+        for key in ["leaving_type", "joining_type"]:
+            if key in context:
+                processed[key] = context[key]
+        
+        return processed
+
+    def _check_data_quality(self, findings: Dict) -> Dict:
+        """Check quality and completeness of analysis"""
+        quality_metrics = {
+            "completeness": 0.0,
+            "confidence": 0.0,
+            "missing_critical": [],
+            "warnings": []
+        }
+        
+        # Check for critical elements
+        scenario = findings.get("scenario", "")
+        if scenario in self.practical_scenarios:
+            critical_elements = self.practical_scenarios[scenario]["critical_elements"]
+            found_elements = {f["element"] for f in findings.get("key_findings", [])}
+            
+            missing_critical = set(critical_elements) - found_elements
+            if missing_critical:
+                quality_metrics["missing_critical"] = list(missing_critical)
+                quality_metrics["warnings"].append(
+                    "Critical information missing - analysis may be incomplete"
+                )
+        
+        # Calculate completeness
+        total_elements = len(self.practical_scenarios.get(scenario, {}).get("required_elements", []))
+        found_elements = len(findings.get("key_findings", []))
+        quality_metrics["completeness"] = found_elements / total_elements if total_elements > 0 else 0
+        
+        # Calculate average confidence
+        confidences = [
+            f.get("practical_impact", {}).get("confidence", 0)
+            for f in findings.get("key_findings", [])
+        ]
+        quality_metrics["confidence"] = sum(confidences) / len(confidences) if confidences else 0
+        
+        findings["quality_metrics"] = quality_metrics
+        return findings
+
+    def _extract_key_phrases(self, doc: Doc) -> List[str]:
+        """Extract key legal phrases from text"""
+        key_phrases = []
+        
+        # Extract noun phrases
+        for chunk in doc.noun_chunks:
+            if any(word in chunk.text.lower() for word in [
+                "shares", "rights", "obligations", "restrictions", 
+                "notice", "termination", "vesting"
+            ]):
+                key_phrases.append(chunk.text.strip())
+        
+        # Extract verb phrases with legal significance
+        for token in doc:
+            if token.pos_ == "VERB" and any(word in token.text.lower() for word in [
+                "shall", "must", "will", "agree", "terminate", "vest"
+            ]):
+                phrase = self._get_verb_phrase(token)
+                if phrase:
+                    key_phrases.append(phrase.strip())
+        
+        return list(set(key_phrases))  # Remove duplicates
+
+    def _get_verb_phrase(self, verb_token) -> str:
+        """Extract complete verb phrase from a verb token"""
+        phrase = []
+        
+        # Get subject
+        for child in verb_token.children:
+            if "subj" in child.dep_:
+                phrase.append(child.text)
+        
+        # Add verb
+        phrase.append(verb_token.text)
+        
+        # Get object and other important children
+        for child in verb_token.children:
+            if child.dep_ in ["dobj", "pobj", "attr"]:
+                phrase.append(child.text)
+        
+        return " ".join(phrase)
+
+    def _identify_legal_patterns(self, doc: Doc) -> List[str]:
+        """Identify common legal patterns in text"""
+        patterns = []
+        
+        # Look for obligation patterns
+        for token in doc:
+            if token.text.lower() in ["shall", "must", "will"]:
+                patterns.append("obligation")
+            elif token.text.lower() in ["may", "can", "entitled"]:
+                patterns.append("permission")
+            elif token.text.lower() in ["unless", "except", "provided"]:
+                patterns.append("condition")
+        
+        # Look for definition patterns
+        for sent in doc.sents:
+            if any(word in sent.text.lower() for word in ["means", "defined", "refers to"]):
+                patterns.append("definition")
+        
+        return list(set(patterns))
+
+    def _evaluate_impact_severity(self, element: str, key_phrases: List[str], patterns: List[str], context: Dict) -> Tuple[str, str]:
+        """Evaluate severity and description of impact"""
+        severity = "Low"
+        description = f"This {element} may affect your rights"
+        
+        # Check for critical patterns
+        if "obligation" in patterns:
+            severity = "High"
+            description = f"This {element} creates mandatory obligations"
+        elif "condition" in patterns:
+            severity = "Medium"
+            description = f"This {element} contains important conditions"
+        
+        # Context-specific evaluation
+        if context:
+            if element == "leaver provisions" and context.get("leaving_type") == "Termination":
+                severity = "High"
+                description = "Critical for determining share treatment on termination"
+            elif element == "vesting" and context.get("tenure"):
+                try:
+                    tenure_months = float(context["tenure"].split()[0]) * 12
+                    if tenure_months < 12:
+                        severity = "High"
+                        description = "Critical for determining vested equity"
+                except ValueError:
+                    pass
+        
+        return severity, description
 
     # ... rest of your existing methods ... 
